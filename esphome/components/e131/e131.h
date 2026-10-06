@@ -19,10 +19,13 @@ class E131AddressableLightEffect;
 enum E131ListenMethod { E131_MULTICAST, E131_UNICAST };
 
 const int E131_MAX_PROPERTY_VALUES_COUNT = 513;
+/// Largest valid E1.31 data packet: 125 header bytes + start code + 512 DMX slots.
+static constexpr size_t E131_MAX_PACKET_SIZE = 638;
 
+/// DMX property values of a received packet. Points into the receive buffer, valid during loop() only.
 struct E131Packet {
-  uint16_t count;
-  uint8_t values[E131_MAX_PROPERTY_VALUES_COUNT];
+  uint16_t count{0};               // number of values, including the DMX start code at values[0]
+  const uint8_t *values{nullptr};  // values[0] is the start code
 };
 
 struct UniverseConsumer {
@@ -58,12 +61,15 @@ class E131Component final : public esphome::Component {
   }
   bool packet_(const uint8_t *data, size_t len, int &universe, E131Packet &packet);
   bool process_(int universe, const E131Packet &packet);
-  bool join_igmp_groups_();
+  void join_igmp_groups_();
+  void igmp_join_(uint16_t universe);
   UniverseConsumer *find_universe_(int universe);
   void join_(int universe);
   void leave_(int universe);
 
   E131ListenMethod listen_method_{E131_MULTICAST};
+  // Set once the socket is bound; IGMP joins requested earlier are made in setup().
+  bool multicast_ready_{false};
 #if defined(USE_SOCKET_IMPL_BSD_SOCKETS) || defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
   std::unique_ptr<socket::Socket> socket_;
 #elif defined(USE_SOCKET_IMPL_LWIP_TCP)

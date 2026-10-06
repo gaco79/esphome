@@ -2,7 +2,6 @@
 #include <cstring>
 #include "e131.h"
 #ifdef USE_NETWORK
-#include "esphome/components/network/ip_address.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 #include "esphome/core/helpers.h"
@@ -59,33 +58,37 @@ union E131RawPacket {
 // Get the offset of `property_values[1]`
 const size_t E131_MIN_PACKET_SIZE = offsetof(E131RawPacket, property_values) + sizeof(uint8_t);
 
-bool E131Component::join_igmp_groups_() {
+// E1.31 multicast group of a universe: 239.255.<universe high byte>.<universe low byte>
+static ip4_addr_t universe_multicast_addr(uint16_t universe) {
+  ip4_addr_t addr;
+  IP4_ADDR(&addr, 239, 255, (universe >> 8) & 0xff, universe & 0xff);
+  return addr;
+}
+
+static_assert(sizeof(E131RawPacket) == E131_MAX_PACKET_SIZE, "E1.31 packet layout changed");
+
+void E131Component::join_igmp_groups_() {
   if (this->listen_method_ != E131_MULTICAST)
-    return false;
-#if defined(USE_SOCKET_IMPL_BSD_SOCKETS) || defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
-  if (this->socket_ == nullptr)
-    return false;
-#endif
+    return;
 
+  // Universes registered before the socket was ready have not been joined yet
   for (auto &entry : this->universe_consumers_) {
-    if (!entry.consumers)
-      continue;
+    this->igmp_join_(entry.universe);
+  }
+}
 
-    ip4_addr_t multicast_addr =
-        network::IPAddress(239, 255, ((entry.universe >> 8) & 0xff), ((entry.universe >> 0) & 0xff));
+void E131Component::igmp_join_(uint16_t universe) {
+  ip4_addr_t multicast_addr = universe_multicast_addr(universe);
 
-    err_t err;
-    {
-      LwIPLock lock;
-      err = igmp_joingroup(IP4_ADDR_ANY4, &multicast_addr);
-    }
-
-    if (err) {
-      ESP_LOGW(TAG, "IGMP join for %d universe of E1.31 failed. Multicast might not work.", entry.universe);
-    }
+  err_t err;
+  {
+    LwIPLock lock;
+    err = igmp_joingroup(IP4_ADDR_ANY4, &multicast_addr);
   }
 
-  return true;
+  if (err) {
+    ESP_LOGW(TAG, "IGMP join for %d universe of E1.31 failed. Multicast might not work.", universe);
+  }
 }
 
 UniverseConsumer *E131Component::find_universe_(int universe) {
@@ -97,17 +100,16 @@ UniverseConsumer *E131Component::find_universe_(int universe) {
 }
 
 void E131Component::join_(int universe) {
-  // store only latest received packet for the given universe
   auto *consumer = this->find_universe_(universe);
   if (consumer != nullptr) {
-    if (consumer->consumers++ > 0) {
-      return;  // we already joined before
-    }
-  } else {
-    this->universe_consumers_.push_back({static_cast<uint16_t>(universe), 1});
+    consumer->consumers++;
+    return;  // we already joined before
   }
+  this->universe_consumers_.push_back({static_cast<uint16_t>(universe), 1});
 
-  if (this->join_igmp_groups_()) {
+  // lwIP reference counts group membership, so join exactly once per universe
+  if (this->listen_method_ == E131_MULTICAST && this->multicast_ready_) {
+    this->igmp_join_(universe);
     ESP_LOGD(TAG, "Joined %d universe for E1.31.", universe);
   }
 }
@@ -121,8 +123,12 @@ void E131Component::leave_(int universe) {
     return;  // we have other consumers of the given universe
   }
 
-  if (this->listen_method_ == E131_MULTICAST) {
-    ip4_addr_t multicast_addr = network::IPAddress(239, 255, ((universe >> 8) & 0xff), ((universe >> 0) & 0xff));
+  // Swap with last element and pop (order doesn't matter)
+  *consumer = this->universe_consumers_.back();
+  this->universe_consumers_.pop_back();
+
+  if (this->listen_method_ == E131_MULTICAST && this->multicast_ready_) {
+    ip4_addr_t multicast_addr = universe_multicast_addr(universe);
 
     LwIPLock lock;
     igmp_leavegroup(IP4_ADDR_ANY4, &multicast_addr);
@@ -152,8 +158,12 @@ bool E131Component::packet_(const uint8_t *data, size_t len, int &universe, E131
   packet.count = htons(sbuff->property_value_count);
   if (packet.count > E131_MAX_PROPERTY_VALUES_COUNT)
     return false;
+  // The values must have been received, not just fit the buffer
+  if (offsetof(E131RawPacket, property_values) + packet.count > len)
+    return false;
 
-  memcpy(packet.values, sbuff->property_values, packet.count);
+  // Reference the values in place instead of copying them
+  packet.values = sbuff->property_values;
   return true;
 }
 
