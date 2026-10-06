@@ -58,12 +58,15 @@ class E131Component final : public esphome::Component {
   }
   bool packet_(const uint8_t *data, size_t len, int &universe, E131Packet &packet);
   bool process_(int universe, const E131Packet &packet);
-  bool join_igmp_groups_();
+  void join_igmp_groups_();
+  void igmp_join_(uint16_t universe);
   UniverseConsumer *find_universe_(int universe);
   void join_(int universe);
   void leave_(int universe);
 
   E131ListenMethod listen_method_{E131_MULTICAST};
+  // Set once the socket is bound; IGMP joins requested earlier are made in setup().
+  bool multicast_ready_{false};
 #if defined(USE_SOCKET_IMPL_BSD_SOCKETS) || defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
   std::unique_ptr<socket::Socket> socket_;
 #elif defined(USE_SOCKET_IMPL_LWIP_TCP)

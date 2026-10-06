@@ -62,7 +62,8 @@ void E131Component::setup() {
   }
 #endif
 
-  join_igmp_groups_();
+  this->multicast_ready_ = true;
+  this->join_igmp_groups_();
 }
 
 void E131Component::loop() {
