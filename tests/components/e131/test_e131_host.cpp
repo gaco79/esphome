@@ -242,6 +242,20 @@ TEST_F(E131ReceiveTest, OversizedDatagramIsTruncatedSafely) {
   EXPECT_EQ(strip.output.red(RGB_LIGHTS_PER_UNIVERSE - 1), 0x44);
 }
 
+TEST_F(E131ReceiveTest, DrainIsBoundedPerLoop) {
+  Strip strip(&this->e131_, 1, 1);
+  strip.start();
+
+  // One universe in use, so a loop() drains at most 8 packets (the minimum bound)
+  for (uint8_t value = 1; value <= 12; value++)
+    this->send(e131_packet(1, RGB_LIGHTS_PER_UNIVERSE * 3, value));
+
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.red(0), 8);
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.red(0), 12);
+}
+
 }  // namespace esphome::e131::testing
 
 #endif  // USE_HOST
