@@ -50,9 +50,7 @@ void WLEDLightEffect::stop() {
 }
 
 void WLEDLightEffect::blank_all_leds_(light::AddressableLight &it) {
-  for (int led = it.size(); led-- > 0;) {
-    it[led].set(Color::BLACK);
-  }
+  it.all() = Color::BLACK;
   it.schedule_show();
 }
 
@@ -177,9 +175,7 @@ bool WLEDLightEffect::parse_notifier_frame_(light::AddressableLight &it, const u
   uint8_t b = esp_scale8(payload[3], bri);
   uint8_t w = esp_scale8(payload[8], bri);
 
-  for (auto &&led : it) {
-    led.set(Color(r, g, b, w));
-  }
+  it.all() = Color(r, g, b, w);
 
   return true;
 }
@@ -213,18 +209,10 @@ bool WLEDLightEffect::parse_drgb_frame_(light::AddressableLight &it, const uint8
     return false;
   }
 
-  auto count = size / 3;
-  auto max_leds = it.size();
-
-  for (uint16_t led = 0; led < count; ++led, payload += 3) {
-    uint8_t r = payload[0];
-    uint8_t g = payload[1];
-    uint8_t b = payload[2];
-
-    if (led < max_leds) {
-      it[led].set(Color(r, g, b));
-    }
-  }
+  it.write_pixels(0, size / 3, [payload](int32_t led) {
+    const uint8_t *rgb = payload + 3 * led;
+    return Color(rgb[0], rgb[1], rgb[2]);
+  });
 
   return true;
 }
@@ -235,19 +223,10 @@ bool WLEDLightEffect::parse_drgbw_frame_(light::AddressableLight &it, const uint
     return false;
   }
 
-  auto count = size / 4;
-  auto max_leds = it.size();
-
-  for (uint16_t led = 0; led < count; ++led, payload += 4) {
-    uint8_t r = payload[0];
-    uint8_t g = payload[1];
-    uint8_t b = payload[2];
-    uint8_t w = payload[3];
-
-    if (led < max_leds) {
-      it[led].set(Color(r, g, b, w));
-    }
-  }
+  it.write_pixels(0, size / 4, [payload](int32_t led) {
+    const uint8_t *rgbw = payload + 4 * led;
+    return Color(rgbw[0], rgbw[1], rgbw[2], rgbw[3]);
+  });
 
   return true;
 }
@@ -267,18 +246,10 @@ bool WLEDLightEffect::parse_dnrgb_frame_(light::AddressableLight &it, const uint
     return false;
   }
 
-  auto count = size / 3;
-  auto max_leds = it.size();
-
-  for (; count > 0; count--, payload += 3, led++) {
-    uint8_t r = payload[0];
-    uint8_t g = payload[1];
-    uint8_t b = payload[2];
-
-    if (led < max_leds) {
-      it[led].set(Color(r, g, b));
-    }
-  }
+  it.write_pixels(led, size / 3, [payload](int32_t i) {
+    const uint8_t *rgb = payload + 3 * i;
+    return Color(rgb[0], rgb[1], rgb[2]);
+  });
 
   return true;
 }

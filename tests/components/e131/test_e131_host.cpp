@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -23,12 +24,17 @@
 namespace esphome::e131::testing {
 
 static constexpr int RGB_LIGHTS_PER_UNIVERSE = 170;
+using Rgbw = std::array<uint8_t, 4>;
 
-// In-memory addressable light: stores RGBW bytes, no hardware.
+// In-memory addressable light: stores RGBW bytes, no hardware. With `expose_layout` it describes
+// its buffer, so the effect's write_pixels() takes the fast path instead of get_view_internal().
 class TestAddressableLight : public light::AddressableLight {
  public:
-  explicit TestAddressableLight(int32_t num_leds)
-      : num_leds_(num_leds), buf_(new uint8_t[num_leds * 4]()), effect_data_(new uint8_t[num_leds]()) {}
+  explicit TestAddressableLight(int32_t num_leds, bool expose_layout = false)
+      : num_leds_(num_leds),
+        expose_layout_(expose_layout),
+        buf_(new uint8_t[num_leds * 4]()),
+        effect_data_(new uint8_t[num_leds]()) {}
 
   void setup() override {}
   void write_state(light::LightState * /*state*/) override {}
@@ -40,25 +46,37 @@ class TestAddressableLight : public light::AddressableLight {
     return traits;
   }
   uint8_t red(int32_t index) const { return this->buf_[index * 4]; }
+  std::array<uint8_t, 4> pixel(int32_t index) const {
+    const uint8_t *p = this->buf_.get() + index * 4;
+    return {p[0], p[1], p[2], p[3]};
+  }
 
  protected:
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (!this->expose_layout_)
+      return false;
+    layout = {this->buf_.get(), 4, {0, 1, 2, 3}};
+    return true;
+  }
   light::ESPColorView get_view_internal(int32_t index) const override {
     uint8_t *p = this->buf_.get() + index * 4;
     return {p, p + 1, p + 2, p + 3, this->effect_data_.get() + index, &this->correction_};
   }
 
   int32_t num_leds_;
+  bool expose_layout_;
   std::unique_ptr<uint8_t[]> buf_;
   std::unique_ptr<uint8_t[]> effect_data_;
 };
 
 // A light strip driven by one E1.31 effect.
 struct Strip {
-  Strip(E131Component *e131, int first_universe, int universes)
-      : output(universes * RGB_LIGHTS_PER_UNIVERSE), state(&output), effect("e131") {
+  Strip(E131Component *e131, int first_universe, int universes, E131LightChannels channels = E131_RGB,
+        bool expose_layout = false)
+      : output(universes * RGB_LIGHTS_PER_UNIVERSE, expose_layout), state(&output), effect("e131") {
     this->output.setup_state(&this->state);
     this->effect.set_first_universe(first_universe);
-    this->effect.set_channels(E131_RGB);
+    this->effect.set_channels(channels);
     this->effect.set_e131(e131);
     this->effect.init_internal(&this->state);
   }
@@ -255,6 +273,57 @@ TEST_F(E131ReceiveTest, DrainIsBoundedPerLoop) {
   this->e131_.loop();
   EXPECT_EQ(strip.output.red(0), 12);
 }
+
+// Each channel mode maps DMX slots to LED colours the same way on both write_pixels() paths.
+class E131ChannelsTest : public E131ReceiveTest, public ::testing::WithParamInterface<bool> {};
+
+TEST_P(E131ChannelsTest, MonoSetsAllChannels) {
+  Strip strip(&this->e131_, 1, 1, E131_MONO, GetParam());
+  strip.start();
+  auto packet = e131_packet(1, 3, 0);
+  packet[126] = 10;
+  packet[127] = 200;
+  packet[128] = 255;
+  this->send(packet);
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.pixel(0), (Rgbw{10, 10, 10, 10}));
+  EXPECT_EQ(strip.output.pixel(1), (Rgbw{200, 200, 200, 200}));
+  EXPECT_EQ(strip.output.pixel(2), (Rgbw{255, 255, 255, 255}));
+  EXPECT_EQ(strip.output.pixel(3), (Rgbw{0, 0, 0, 0}));
+}
+
+TEST_P(E131ChannelsTest, RgbSetsWhiteToAverage) {
+  Strip strip(&this->e131_, 1, 1, E131_RGB, GetParam());
+  strip.start();
+  const uint8_t slots[] = {10, 20, 33, 255, 255, 255, 0, 0, 2, 255, 255, 254, 1, 1, 1};
+  auto packet = e131_packet(1, sizeof(slots), 0);
+  memcpy(&packet[126], slots, sizeof(slots));
+  this->send(packet);
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.pixel(0), (Rgbw{10, 20, 33, 21}));
+  EXPECT_EQ(strip.output.pixel(1), (Rgbw{255, 255, 255, 255}));
+  EXPECT_EQ(strip.output.pixel(2), (Rgbw{0, 0, 2, 0}));
+  EXPECT_EQ(strip.output.pixel(3), (Rgbw{255, 255, 254, 254}));
+  EXPECT_EQ(strip.output.pixel(4), (Rgbw{1, 1, 1, 1}));
+}
+
+TEST_P(E131ChannelsTest, RgbwCopiesChannels) {
+  Strip strip(&this->e131_, 1, 1, E131_RGBW, GetParam());
+  strip.start();
+  const uint8_t slots[] = {1, 2, 3, 4, 250, 251, 252, 253};
+  auto packet = e131_packet(1, sizeof(slots), 0);
+  memcpy(&packet[126], slots, sizeof(slots));
+  this->send(packet);
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.pixel(0), (Rgbw{1, 2, 3, 4}));
+  EXPECT_EQ(strip.output.pixel(1), (Rgbw{250, 251, 252, 253}));
+  EXPECT_EQ(strip.output.pixel(2), (Rgbw{0, 0, 0, 0}));
+}
+
+INSTANTIATE_TEST_SUITE_P(WritePath, E131ChannelsTest, ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool> &info) {
+                           return info.param ? "BufferLayout" : "ViewFallback";
+                         });
 
 }  // namespace esphome::e131::testing
 

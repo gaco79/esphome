@@ -20,7 +20,8 @@ namespace esphome::benchmarks {
 static constexpr uint16_t E131_PORT = 5568;
 static constexpr int RGB_LIGHTS_PER_UNIVERSE = 170;
 
-// In-memory addressable light: stores RGBW bytes, no hardware.
+// In-memory addressable light: stores RGBW bytes, no hardware. Like the in-tree LED strip
+// outputs, it describes its buffer so write_pixels() can take its fast path.
 class BenchAddressableLight : public light::AddressableLight {
  public:
   explicit BenchAddressableLight(int32_t num_leds)
@@ -38,6 +39,10 @@ class BenchAddressableLight : public light::AddressableLight {
   uint8_t raw(int32_t index, int channel) const { return this->buf_[index * 4 + channel]; }
 
  protected:
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    layout = {this->buf_.get(), 4, {0, 1, 2, 3}};
+    return true;
+  }
   light::ESPColorView get_view_internal(int32_t index) const override {
     uint8_t *p = this->buf_.get() + index * 4;
     return {p, p + 1, p + 2, p + 3, this->effect_data_.get() + index, &this->correction_};
