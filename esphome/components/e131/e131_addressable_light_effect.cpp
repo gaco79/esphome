@@ -16,7 +16,7 @@ int E131AddressableLightEffect::get_lights_per_universe() const { return MAX_DAT
 
 int E131AddressableLightEffect::get_first_universe() const { return first_universe_; }
 
-int E131AddressableLightEffect::get_last_universe() const { return first_universe_ + get_universe_count() - 1; }
+int E131AddressableLightEffect::get_last_universe() const { return last_universe_; }
 
 int E131AddressableLightEffect::get_universe_count() const {
   // Round up to lights_per_universe
@@ -26,6 +26,10 @@ int E131AddressableLightEffect::get_universe_count() const {
 
 void E131AddressableLightEffect::start() {
   AddressableLightEffect::start();
+
+  // Strip size and channel count are fixed while the effect runs, so compute the
+  // universe range once instead of on every packet.
+  this->last_universe_ = this->first_universe_ + this->get_universe_count() - 1;
 
   if (this->e131_) {
     this->e131_->add_effect(this);
@@ -45,17 +49,18 @@ void E131AddressableLightEffect::apply(light::AddressableLight &it, const Color 
 }
 
 bool E131AddressableLightEffect::process_(int universe, const E131Packet &packet) {
-  auto *it = get_addressable_();
-
   // check if this is our universe and data are valid
-  if (universe < first_universe_ || universe > get_last_universe())
+  if (universe < first_universe_ || universe > last_universe_)
     return false;
 
-  int32_t output_offset = (universe - first_universe_) * get_lights_per_universe();
+  auto *it = get_addressable_();
+
+  const int lights_per_universe = get_lights_per_universe();
+  int32_t output_offset = (universe - first_universe_) * lights_per_universe;
   // limit amount of lights per universe and received
   // packet.count is the number of DMX bytes including start code; divide by channels to get the number of lights
   int lights_in_packet = (packet.count > 0) ? (packet.count - 1) / channels_ : 0;
-  int output_end = std::min({it->size(), output_offset + get_lights_per_universe(), output_offset + lights_in_packet});
+  int output_end = std::min({it->size(), output_offset + lights_per_universe, output_offset + lights_in_packet});
   auto *input_data = packet.values + 1;
 
   auto effect_name = get_name();
