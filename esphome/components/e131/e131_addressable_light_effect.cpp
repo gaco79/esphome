@@ -6,7 +6,7 @@
 namespace esphome::e131 {
 
 static const char *const TAG = "e131_addressable_light_effect";
-static const int MAX_DATA_SIZE = (sizeof(E131Packet::values) - 1);
+static const int MAX_DATA_SIZE = E131_MAX_PROPERTY_VALUES_COUNT - 1;
 
 E131AddressableLightEffect::E131AddressableLightEffect(const char *name) : AddressableLightEffect(name) {}
 

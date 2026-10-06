@@ -65,6 +65,8 @@ static ip4_addr_t universe_multicast_addr(uint16_t universe) {
   return addr;
 }
 
+static_assert(sizeof(E131RawPacket) == E131_MAX_PACKET_SIZE, "E1.31 packet layout changed");
+
 void E131Component::join_igmp_groups_() {
   if (this->listen_method_ != E131_MULTICAST)
     return;
@@ -156,8 +158,12 @@ bool E131Component::packet_(const uint8_t *data, size_t len, int &universe, E131
   packet.count = htons(sbuff->property_value_count);
   if (packet.count > E131_MAX_PROPERTY_VALUES_COUNT)
     return false;
+  // The values must have been received, not just fit the buffer
+  if (offsetof(E131RawPacket, property_values) + packet.count > len)
+    return false;
 
-  memcpy(packet.values, sbuff->property_values, packet.count);
+  // Reference the values in place instead of copying them
+  packet.values = sbuff->property_values;
   return true;
 }
 

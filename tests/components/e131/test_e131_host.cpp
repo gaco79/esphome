@@ -4,8 +4,14 @@
 
 #ifdef USE_HOST
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include <lwip/igmp.h>
 
@@ -63,6 +69,27 @@ struct Strip {
   light::LightState state;
   E131AddressableLightEffect effect;
 };
+
+// E1.31 data packet for `universe` with `dmx_bytes` slots of `value`; `count_override`
+// replaces the property value count to build malformed packets.
+static std::vector<uint8_t> e131_packet(uint16_t universe, uint16_t dmx_bytes, uint8_t value, int count_override = -1) {
+  static const uint8_t ACN_ID[12] = {0x41, 0x53, 0x43, 0x2d, 0x45, 0x31, 0x2e, 0x31, 0x37, 0x00, 0x00, 0x00};
+  std::vector<uint8_t> buf(126 + dmx_bytes, 0);
+  buf[1] = 0x10;
+  memcpy(&buf[4], ACN_ID, sizeof(ACN_ID));
+  buf[21] = 0x04;  // VECTOR_ROOT_E131_DATA
+  buf[43] = 0x02;  // VECTOR_E131_DATA_PACKET
+  buf[113] = universe >> 8;
+  buf[114] = universe & 0xff;
+  buf[117] = 0x02;  // VECTOR_DMP_SET_PROPERTY
+  buf[118] = 0xa1;
+  buf[122] = 0x01;
+  const uint16_t count = count_override >= 0 ? count_override : dmx_bytes + 1;
+  buf[123] = count >> 8;
+  buf[124] = count & 0xff;
+  memset(&buf[126], value, dmx_bytes);
+  return buf;
+}
 
 class E131Test : public ::testing::Test {
  protected:
@@ -152,6 +179,67 @@ TEST_F(E131Test, LoopDisabledWhileNoEffectActive) {
   EXPECT_TRUE(e131.is_in_loop_state());  // b still active
   b.stop();
   EXPECT_TRUE(e131.is_idle());
+}
+
+// --- Receive path ---
+
+class E131ReceiveTest : public E131Test {
+ protected:
+  void SetUp() override {
+    E131Test::SetUp();
+    this->e131_.set_method(E131_UNICAST);
+    this->e131_.setup();
+    this->tx_ = ::socket(AF_INET, SOCK_DGRAM, 0);
+    this->dest_.sin_family = AF_INET;
+    this->dest_.sin_port = htons(5568);
+    this->dest_.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  }
+  void TearDown() override { ::close(this->tx_); }
+  void send(const std::vector<uint8_t> &packet) {
+    ::sendto(this->tx_, packet.data(), packet.size(), 0, reinterpret_cast<const sockaddr *>(&this->dest_),
+             sizeof(this->dest_));
+  }
+
+  E131Component e131_;
+  int tx_{-1};
+  sockaddr_in dest_{};
+};
+
+TEST_F(E131ReceiveTest, AppliesAllUniversesOfAFrame) {
+  Strip strip(&this->e131_, 1, 2);
+  strip.start();
+
+  this->send(e131_packet(1, RGB_LIGHTS_PER_UNIVERSE * 3, 0x11));
+  this->send(e131_packet(2, RGB_LIGHTS_PER_UNIVERSE * 3, 0x22));
+  this->e131_.loop();
+
+  EXPECT_EQ(strip.output.red(0), 0x11);
+  EXPECT_EQ(strip.output.red(RGB_LIGHTS_PER_UNIVERSE - 1), 0x11);
+  EXPECT_EQ(strip.output.red(RGB_LIGHTS_PER_UNIVERSE), 0x22);
+  EXPECT_EQ(strip.output.red(2 * RGB_LIGHTS_PER_UNIVERSE - 1), 0x22);
+}
+
+TEST_F(E131ReceiveTest, RejectsCountBeyondReceivedData) {
+  Strip strip(&this->e131_, 1, 1);
+  strip.start();
+
+  // Claims 513 values but carries only 30
+  this->send(e131_packet(1, 30, 0x33, E131_MAX_PROPERTY_VALUES_COUNT));
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.red(0), 0);
+}
+
+TEST_F(E131ReceiveTest, OversizedDatagramIsTruncatedSafely) {
+  Strip strip(&this->e131_, 1, 1);
+  strip.start();
+
+  // A valid full universe followed by trailing bytes beyond the largest E1.31 packet
+  auto packet = e131_packet(1, 512, 0x44);
+  packet.resize(1200, 0xEE);
+  this->send(packet);
+  this->e131_.loop();
+  EXPECT_EQ(strip.output.red(0), 0x44);
+  EXPECT_EQ(strip.output.red(RGB_LIGHTS_PER_UNIVERSE - 1), 0x44);
 }
 
 }  // namespace esphome::e131::testing

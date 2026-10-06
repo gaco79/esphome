@@ -19,10 +19,13 @@ class E131AddressableLightEffect;
 enum E131ListenMethod { E131_MULTICAST, E131_UNICAST };
 
 const int E131_MAX_PROPERTY_VALUES_COUNT = 513;
+/// Largest valid E1.31 data packet: 125 header bytes + start code + 512 DMX slots.
+static constexpr size_t E131_MAX_PACKET_SIZE = 638;
 
+/// DMX property values of a received packet. Points into the receive buffer, valid during loop() only.
 struct E131Packet {
-  uint16_t count;
-  uint8_t values[E131_MAX_PROPERTY_VALUES_COUNT];
+  uint16_t count{0};               // number of values, including the DMX start code at values[0]
+  const uint8_t *values{nullptr};  // values[0] is the start code
 };
 
 struct UniverseConsumer {

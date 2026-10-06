@@ -74,7 +74,7 @@ void E131Component::setup() {
 void E131Component::loop() {
   E131Packet packet;
   int universe = 0;
-  uint8_t buf[1460];
+  uint8_t buf[E131_MAX_PACKET_SIZE];
   ssize_t len;
 
   // Drain all queued packets so multi-universe frames are applied
