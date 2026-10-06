@@ -2,7 +2,6 @@
 #include <cstring>
 #include "e131.h"
 #ifdef USE_NETWORK
-#include "esphome/components/network/ip_address.h"
 #include "esphome/core/log.h"
 #include "esphome/core/util.h"
 #include "esphome/core/helpers.h"
@@ -59,6 +58,13 @@ union E131RawPacket {
 // Get the offset of `property_values[1]`
 const size_t E131_MIN_PACKET_SIZE = offsetof(E131RawPacket, property_values) + sizeof(uint8_t);
 
+// E1.31 multicast group of a universe: 239.255.<universe high byte>.<universe low byte>
+static ip4_addr_t universe_multicast_addr(uint16_t universe) {
+  ip4_addr_t addr;
+  IP4_ADDR(&addr, 239, 255, (universe >> 8) & 0xff, universe & 0xff);
+  return addr;
+}
+
 bool E131Component::join_igmp_groups_() {
   if (this->listen_method_ != E131_MULTICAST)
     return false;
@@ -71,8 +77,7 @@ bool E131Component::join_igmp_groups_() {
     if (!entry.consumers)
       continue;
 
-    ip4_addr_t multicast_addr =
-        network::IPAddress(239, 255, ((entry.universe >> 8) & 0xff), ((entry.universe >> 0) & 0xff));
+    ip4_addr_t multicast_addr = universe_multicast_addr(entry.universe);
 
     err_t err;
     {
@@ -122,7 +127,7 @@ void E131Component::leave_(int universe) {
   }
 
   if (this->listen_method_ == E131_MULTICAST) {
-    ip4_addr_t multicast_addr = network::IPAddress(239, 255, ((universe >> 8) & 0xff), ((universe >> 0) & 0xff));
+    ip4_addr_t multicast_addr = universe_multicast_addr(universe);
 
     LwIPLock lock;
     igmp_leavegroup(IP4_ADDR_ANY4, &multicast_addr);
