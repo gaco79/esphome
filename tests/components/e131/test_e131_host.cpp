@@ -136,6 +136,24 @@ TEST_F(E131Test, UnicastNeverJoins) {
   EXPECT_EQ(lwip_stub::igmp_leave_calls, 0u);
 }
 
+// --- Loop only runs while an effect is active ---
+
+TEST_F(E131Test, LoopDisabledWhileNoEffectActive) {
+  E131Component e131;
+  e131.setup();
+  EXPECT_TRUE(e131.is_idle());
+
+  Strip a(&e131, 1, 1);
+  Strip b(&e131, 2, 1);
+  a.start();
+  EXPECT_TRUE(e131.is_in_loop_state());
+  b.start();
+  a.stop();
+  EXPECT_TRUE(e131.is_in_loop_state());  // b still active
+  b.stop();
+  EXPECT_TRUE(e131.is_idle());
+}
+
 }  // namespace esphome::e131::testing
 
 #endif  // USE_HOST

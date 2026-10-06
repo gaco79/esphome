@@ -64,6 +64,11 @@ void E131Component::setup() {
 
   this->multicast_ready_ = true;
   this->join_igmp_groups_();
+
+  // Nothing to receive until an effect starts; add_effect() re-enables the loop.
+  if (this->light_effects_.empty()) {
+    this->disable_loop();
+  }
 }
 
 void E131Component::loop() {
@@ -97,6 +102,7 @@ void E131Component::add_effect(E131AddressableLightEffect *light_effect) {
            light_effect->get_first_universe(), light_effect->get_last_universe());
 
   light_effects_.push_back(light_effect);
+  this->enable_loop();
 
   for (auto universe = light_effect->get_first_universe(); universe <= light_effect->get_last_universe(); ++universe) {
     join_(universe);
@@ -119,6 +125,10 @@ void E131Component::remove_effect(E131AddressableLightEffect *light_effect) {
 
   for (auto universe = light_effect->get_first_universe(); universe <= light_effect->get_last_universe(); ++universe) {
     leave_(universe);
+  }
+
+  if (light_effects_.empty()) {
+    this->disable_loop();
   }
 }
 
