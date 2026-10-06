@@ -14,11 +14,7 @@ ESPColorView ESPRangeView::operator[](int32_t index) const {
   return (*this->parent_)[index];
 }
 
-void ESPRangeView::set(const Color &color) {
-  for (int32_t i = this->begin_; i < this->end_; i++) {
-    (*this->parent_)[i] = color;
-  }
-}
+void ESPRangeView::set(const Color &color) { this->parent_->fill_pixels(this->begin_, this->size(), color); }
 
 void ESPRangeView::set_red(uint8_t red) {
   for (auto c : *this)

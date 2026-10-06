@@ -115,6 +115,14 @@ class NeoPixelRGBLightOutput : public NeoPixelBusLightOutputBase<T_METHOD, T_COL
   }
 
  protected:
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->controller_ == nullptr)
+      return false;
+    layout = {this->controller_->Pixels(),
+              3,
+              {this->rgb_offsets_[0], this->rgb_offsets_[1], this->rgb_offsets_[2], light::ChannelColors::NO_WHITE}};
+    return true;
+  }
   light::ESPColorView get_view_internal(int32_t index) const override {  // NOLINT
     uint8_t *base = this->controller_->Pixels() + 3ULL * index;
     return light::ESPColorView(base + this->rgb_offsets_[0], base + this->rgb_offsets_[1], base + this->rgb_offsets_[2],
@@ -132,6 +140,14 @@ class NeoPixelRGBWLightOutput : public NeoPixelBusLightOutputBase<T_METHOD, T_CO
   }
 
  protected:
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->controller_ == nullptr)
+      return false;
+    layout = {this->controller_->Pixels(),
+              4,
+              {this->rgb_offsets_[0], this->rgb_offsets_[1], this->rgb_offsets_[2], this->rgb_offsets_[3]}};
+    return true;
+  }
   light::ESPColorView get_view_internal(int32_t index) const override {  // NOLINT
     uint8_t *base = this->controller_->Pixels() + 4ULL * index;
     return light::ESPColorView(base + this->rgb_offsets_[0], base + this->rgb_offsets_[1], base + this->rgb_offsets_[2],

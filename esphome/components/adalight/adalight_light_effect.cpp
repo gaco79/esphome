@@ -40,9 +40,7 @@ void AdalightLightEffect::reset_frame_(light::AddressableLight &it) {
 }
 
 void AdalightLightEffect::blank_all_leds_(light::AddressableLight &it) {
-  for (int led = it.size(); led-- > 0;) {
-    it[led].set(Color::BLACK);
-  }
+  it.all() = Color::BLACK;
   it.schedule_show();
 }
 
@@ -127,11 +125,10 @@ AdalightLightEffect::Frame AdalightLightEffect::parse_frame_(light::AddressableL
   auto accepted_led_count = std::min<int>(led_count, it.size());
   uint8_t *led_data = &frame_[6];
 
-  for (int led = 0; led < accepted_led_count; led++, led_data += 3) {
-    auto white = std::min({led_data[0], led_data[1], led_data[2]});
-
-    it[led].set(Color(led_data[0], led_data[1], led_data[2], white));
-  }
+  it.write_pixels(0, accepted_led_count, [led_data](int32_t led) {
+    const uint8_t *rgb = led_data + 3 * led;
+    return Color(rgb[0], rgb[1], rgb[2], std::min({rgb[0], rgb[1], rgb[2]}));
+  });
 
   it.schedule_show();
   return CONSUMED;

@@ -221,6 +221,13 @@ class FastLEDLightOutput final : public light::AddressableLight {
   }
 
  protected:
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->leds_ == nullptr)
+      return false;
+    static_assert(sizeof(CRGB) == 3, "CRGB must be packed red, green, blue");
+    layout = {&this->leds_[0].r, sizeof(CRGB), {0, 1, 2, light::ChannelColors::NO_WHITE}};
+    return true;
+  }
   light::ESPColorView get_view_internal(int32_t index) const override {
     return {&this->leds_[index].r,      &this->leds_[index].g, &this->leds_[index].b, nullptr,
             &this->effect_data_[index], &this->correction_};

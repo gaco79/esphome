@@ -26,8 +26,54 @@ inline uint8_t gamma_table_reverse_search(const uint16_t *table, uint16_t target
   return lo;
 }
 
+/// Look up `value` in a uint16[256] PROGMEM gamma table and round the result to 8 bits.
+/// A non-zero table entry never rounds down to 0. A null table returns `value` unchanged.
+inline uint8_t ESPHOME_ALWAYS_INLINE gamma_table_correct(const uint16_t *table, uint8_t value) {
+  if (table == nullptr)
+    return value;
+  uint16_t table_value = progmem_read_uint16(&table[value]);
+  // (x - (x >> 8)) >> 8 equals x / 257 for every x up to 65535 + 128, without a division
+  // (ESP8266 has no divide instruction and would call __divsi3 for every channel).
+  uint32_t x = uint32_t(table_value) + 128;
+  uint8_t result = (x - (x >> 8)) >> 8;
+  if (result == 0 && table_value != 0)
+    return 1;
+  return result;
+}
+
 class ESPColorCorrection {
  public:
+  /// The correction captured in local values, for loops that correct many pixels.
+  ///
+  /// Gives the same results as color_correct_*(). Each channel's two brightness factors are
+  /// multiplied together up front. Holding them by value also stops writes to a uint8_t pixel
+  /// buffer, which the compiler must assume can alias any object, from forcing a reload of the
+  /// correction for every pixel.
+  struct Snapshot {
+    inline uint8_t ESPHOME_ALWAYS_INLINE red(uint8_t value) const { return this->apply_(value, this->red_factor); }
+    inline uint8_t ESPHOME_ALWAYS_INLINE green(uint8_t value) const { return this->apply_(value, this->green_factor); }
+    inline uint8_t ESPHOME_ALWAYS_INLINE blue(uint8_t value) const { return this->apply_(value, this->blue_factor); }
+    inline uint8_t ESPHOME_ALWAYS_INLINE white(uint8_t value) const { return this->apply_(value, this->white_factor); }
+
+    const uint16_t *gamma_table;
+    uint32_t red_factor;
+    uint32_t green_factor;
+    uint32_t blue_factor;
+    uint32_t white_factor;
+
+   protected:
+    inline uint8_t ESPHOME_ALWAYS_INLINE apply_(uint8_t value, uint32_t factor) const {
+      // Same as esp_scale8_twice(): (value * (1 + max) * (1 + local)) >> 16
+      return gamma_table_correct(this->gamma_table, (uint32_t(value) * factor) >> 16);
+    }
+  };
+  Snapshot snapshot() const {
+    const uint32_t local = 1 + uint32_t(this->local_brightness_);
+    return {this->gamma_table_, (1 + uint32_t(this->max_brightness_.red)) * local,
+            (1 + uint32_t(this->max_brightness_.green)) * local, (1 + uint32_t(this->max_brightness_.blue)) * local,
+            (1 + uint32_t(this->max_brightness_.white)) * local};
+  }
+
   void set_max_brightness(const Color &max_brightness) { this->max_brightness_ = max_brightness; }
   void set_local_brightness(uint8_t local_brightness) { this->local_brightness_ = local_brightness; }
   void set_gamma_table(const uint16_t *table) { this->gamma_table_ = table; }
@@ -68,7 +114,9 @@ class ESPColorCorrection {
 
  protected:
   /// Forward gamma: read uint16 PROGMEM table, convert to uint8
-  uint8_t gamma_correct_(uint8_t value) const;
+  inline uint8_t gamma_correct_(uint8_t value) const ESPHOME_ALWAYS_INLINE {
+    return gamma_table_correct(this->gamma_table_, value);
+  }
   /// Reverse gamma: binary search the forward PROGMEM table
   uint8_t gamma_uncorrect_(uint8_t value) const;
   /// Shared body of color_uncorrect_{red,green,blue,white}. Kept out-of-line

@@ -67,27 +67,30 @@ bool E131AddressableLightEffect::process_(int universe, const E131Packet &packet
   ESP_LOGV(TAG, "Applying data for '%.*s' on %d universe, for %" PRId32 "-%d.", (int) effect_name.size(),
            effect_name.c_str(), universe, output_offset, output_end);
 
+  const int32_t count = output_end - output_offset;
   switch (channels_) {
     case E131_MONO:
-      for (; output_offset < output_end; output_offset++, input_data++) {
-        auto output = (*it)[output_offset];
-        output.set(Color(input_data[0], input_data[0], input_data[0], input_data[0]));
-      }
+      it->write_pixels(output_offset, count, [input_data](int32_t i) {
+        const uint8_t value = input_data[i];
+        return Color(value, value, value, value);
+      });
       break;
 
     case E131_RGB:
-      for (; output_offset < output_end; output_offset++, input_data += 3) {
-        auto output = (*it)[output_offset];
-        output.set(
-            Color(input_data[0], input_data[1], input_data[2], (input_data[0] + input_data[1] + input_data[2]) / 3));
-      }
+      it->write_pixels(output_offset, count, [input_data](int32_t i) {
+        const uint8_t *rgb = input_data + 3 * i;
+        // White is the average of the three; (sum * 683) >> 11 == sum / 3 for every sum up to 765,
+        // without a division (ESP8266 has no divide instruction).
+        const uint32_t sum = rgb[0] + rgb[1] + rgb[2];
+        return Color(rgb[0], rgb[1], rgb[2], (sum * 683) >> 11);
+      });
       break;
 
     case E131_RGBW:
-      for (; output_offset < output_end; output_offset++, input_data += 4) {
-        auto output = (*it)[output_offset];
-        output.set(Color(input_data[0], input_data[1], input_data[2], input_data[3]));
-      }
+      it->write_pixels(output_offset, count, [input_data](int32_t i) {
+        const uint8_t *rgbw = input_data + 4 * i;
+        return Color(rgbw[0], rgbw[1], rgbw[2], rgbw[3]);
+      });
       break;
   }
 
