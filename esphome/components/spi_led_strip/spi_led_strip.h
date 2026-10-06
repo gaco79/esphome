@@ -28,6 +28,13 @@ class SpiLedStrip final : public light::AddressableLight,
 
  protected:
   light::ESPColorView get_view_internal(int32_t index) const override;
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->buf_ == nullptr)
+      return false;
+    // Matches get_view_internal(): each LED is a brightness byte then blue, green, red.
+    layout = {this->buf_ + 5, 4, {2, 1, 0, light::ChannelColors::NO_WHITE}};
+    return true;
+  }
 
   size_t buffer_size_{};
   uint8_t *effect_data_{nullptr};

@@ -27,6 +27,12 @@ class M5Stack8AngleLightOutput final : public light::AddressableLight, public Pa
 
  protected:
   light::ESPColorView get_view_internal(int32_t index) const override;
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->buf_ == nullptr)
+      return false;
+    layout = {this->buf_, M5STACK_8ANGLE_BYTES_PER_LED, {0, 1, 2, light::ChannelColors::NO_WHITE}};
+    return true;
+  }
 
   uint8_t *buf_{nullptr};
   uint8_t *effect_data_{nullptr};

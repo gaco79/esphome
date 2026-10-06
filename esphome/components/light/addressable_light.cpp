@@ -22,6 +22,44 @@ void AddressableLight::call_setup() {
 #endif
 }
 
+void AddressableLight::fill_pixels(int32_t start, int32_t count, const Color &color) {
+  const int32_t begin = std::max<int32_t>(start, 0);
+  const int32_t end = std::min(start + std::max<int32_t>(count, 0), this->size());
+  if (begin >= end)
+    return;
+
+  PixelBufferLayout layout;
+  if (!this->get_pixel_buffer_layout(layout)) {
+    for (int32_t i = begin; i < end; i++)
+      this->get_view_internal(i).set_rgbw(color.r, color.g, color.b, color.w);
+    return;
+  }
+
+  const ESPColorCorrection::Snapshot correction = this->correction_.snapshot();
+  const ChannelColors colors = layout.colors;
+  const uint8_t stride = layout.stride;
+  const uint8_t r = correction.red(color.r);
+  const uint8_t g = correction.green(color.g);
+  const uint8_t b = correction.blue(color.b);
+  uint8_t *led = layout.data + begin * stride;
+  uint8_t *const stop = layout.data + end * stride;
+  if (colors.has_white()) {
+    const uint8_t w = correction.white(color.w);
+    for (; led != stop; led += stride) {
+      led[colors.r] = r;
+      led[colors.g] = g;
+      led[colors.b] = b;
+      led[colors.w] = w;
+    }
+  } else {
+    for (; led != stop; led += stride) {
+      led[colors.r] = r;
+      led[colors.g] = g;
+      led[colors.b] = b;
+    }
+  }
+}
+
 std::unique_ptr<LightTransformer> AddressableLight::create_default_transition() {
   return make_unique<AddressableLightTransformer>(*this);
 }
@@ -142,9 +180,7 @@ optional<LightColorValues> AddressableLightTransformer::apply() {
       uint8_t g = subtract_scaled_difference(this->target_color_.green, start.green, remaining);
       uint8_t b = subtract_scaled_difference(this->target_color_.blue, start.blue, remaining);
       uint8_t w = subtract_scaled_difference(this->target_color_.white, start.white, remaining);
-      for (auto led : this->light_) {
-        led.set_rgbw(r, g, b, w);
-      }
+      this->light_.fill_pixels(0, this->light_.size(), Color(r, g, b, w));
     } else {
       int32_t scale =
           int32_t(256.f * std::max((1.f - smoothed_progress) / (1.f - this->last_transition_progress_), 0.f));

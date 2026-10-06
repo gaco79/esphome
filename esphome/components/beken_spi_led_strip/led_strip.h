@@ -46,6 +46,12 @@ class BekenSPILEDStripLightOutput final : public light::AddressableLight {
 
  protected:
   light::ESPColorView get_view_internal(int32_t index) const override;
+  bool get_pixel_buffer_layout(light::PixelBufferLayout &layout) const override {
+    if (this->buf_ == nullptr)
+      return false;
+    layout = {this->buf_, this->channel_colors_.bytes_per_led(), this->channel_colors_};
+    return true;
+  }
 
   size_t get_buffer_size_() const { return this->num_leds_ * this->channel_colors_.bytes_per_led(); }
 

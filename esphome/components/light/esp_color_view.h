@@ -53,6 +53,19 @@ class ESPColorView : public ESPColorSettable {
     return *this;
   }
   void set(const Color &color) override { this->set_rgbw(color.r, color.g, color.b, color.w); }
+  // These hide ESPColorSettable's versions, which go through the virtual set_red() etc. one
+  // channel at a time. A view is written for every pixel, so correct all channels inline.
+  void set_rgb(uint8_t red, uint8_t green, uint8_t blue) {
+    const ESPColorCorrection *correction = this->color_correction_;
+    *this->red_ = correction->color_correct_red(red);
+    *this->green_ = correction->color_correct_green(green);
+    *this->blue_ = correction->color_correct_blue(blue);
+  }
+  void set_rgbw(uint8_t red, uint8_t green, uint8_t blue, uint8_t white) {
+    this->set_rgb(red, green, blue);
+    if (this->white_ != nullptr)
+      *this->white_ = this->color_correction_->color_correct_white(white);
+  }
   void set_red(uint8_t red) override { *this->red_ = this->color_correction_->color_correct_red(red); }
   void set_green(uint8_t green) override { *this->green_ = this->color_correction_->color_correct_green(green); }
   void set_blue(uint8_t blue) override { *this->blue_ = this->color_correction_->color_correct_blue(blue); }
